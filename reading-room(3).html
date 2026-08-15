@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Reading Room — listen to any book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Literata:ital,opsz,wght@0,16..30,400;0,16..30,500;0,16..30,600;1,16..30,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Format parsers -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<!-- React (UMD, no JSX/Babel — plain React.createElement, so nothing here depends on an in-browser transpiler) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+
+<style>
+  :root{
+    --ink:#1B2430; --ink-2:#232E3D; --ink-3:#2C3A4C;
+    --parchment:#EFE6D6; --parchment-2:#E4D8C0;
+    --text-dark:#2B2318; --text-muted-dark:#6B5F4C;
+    --text-light:#EDE6D9; --text-muted-light:#9AA7B5;
+    --brass:#C9A24B; --brass-bright:#E0BC6C;
+    --moss:#6E8F74; --ribbon:#A63D40; --steel:#6F93C4;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{ margin:0; background:var(--ink); color:var(--text-light); font-family:'Literata', serif; }
+  #root{ display:flex; flex-direction:column; min-height:100vh; }
+  ::selection{ background:var(--brass); color:var(--ink); }
+
+  header{ display:flex; align-items:center; justify-content:space-between; padding:16px 26px; border-bottom:1px solid rgba(255,255,255,0.08); flex-shrink:0; gap:14px; }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand .mark{ font-family:'Fraunces', serif; font-weight:700; font-style:italic; font-size:22px; color:var(--brass-bright); }
+  .brand h1{ font-family:'Fraunces', serif; font-weight:600; font-size:19px; margin:0; letter-spacing:0.2px; }
+  .brand .sub{ font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-muted-light); letter-spacing:0.06em; text-transform:uppercase; }
+  header nav{ display:flex; gap:8px; align-items:center; }
+
+  .btn{ font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.03em; background:transparent; color:var(--text-light); border:1px solid rgba(255,255,255,0.18); padding:9px 14px; border-radius:var(--radius); cursor:pointer; transition:border-color .15s ease, background .15s ease, transform .1s ease; }
+  .btn:hover{ border-color:var(--brass); background:rgba(201,162,75,0.08); }
+  .btn:active{ transform:scale(0.97); }
+  .btn.primary{ background:var(--brass); color:#241C0E; border-color:var(--brass); font-weight:600; }
+  .btn.primary:hover{ background:var(--brass-bright); }
+  .btn.ghost{ border-color:transparent; color:var(--text-muted-light); }
+  .btn.ghost:hover{ color:var(--text-light); background:rgba(255,255,255,0.06); }
+  .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+  .btn:focus-visible, input:focus-visible, select:focus-visible, .sentence:focus-visible, [tabindex]:focus-visible{ outline:2px solid var(--brass-bright); outline-offset:2px; }
+
+  main{ flex:1; display:flex; min-height:0; position:relative; }
+
+  /* Library */
+  #libraryView{ flex:1; overflow-y:auto; padding:44px 26px 80px; }
+  .library-inner{ max-width:780px; margin:0 auto; }
+  .hero{ text-align:center; margin-bottom:36px; }
+  .hero h2{ font-family:'Fraunces', serif; font-weight:600; font-style:italic; font-size:clamp(26px,4vw,40px); margin:0 0 10px; }
+  .hero p{ color:var(--text-muted-light); font-size:14.5px; max-width:480px; margin:0 auto; line-height:1.65; }
+  .dropzone{ border:1.5px dashed rgba(255,255,255,0.25); border-radius:14px; padding:38px 22px; text-align:center; cursor:pointer; transition:border-color .15s ease, background .15s ease; margin-bottom:14px; background:rgba(255,255,255,0.02); }
+  .dropzone:hover, .dropzone.dragover{ border-color:var(--brass); background:rgba(201,162,75,0.06); }
+  .dropzone .icon{ font-size:28px; margin-bottom:8px; opacity:0.85; }
+  .dropzone strong{ font-family:'Fraunces', serif; font-size:16.5px; font-weight:600; display:block; margin-bottom:4px; }
+  .dropzone span{ color:var(--text-muted-light); font-size:12.5px; }
+  .formats-line{ text-align:center; font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-muted-light); margin-bottom:40px; }
+  .formats-line b{ color:var(--brass-bright); font-weight:600; }
+
+  .shelf-heading{ font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-muted-light); margin:0 0 14px; display:flex; align-items:center; gap:10px; }
+  .shelf-heading::after{ content:''; flex:1; height:1px; background:rgba(255,255,255,0.1); }
+  .shelf-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px,1fr)); gap:12px; }
+  .book-card{ display:flex; align-items:center; gap:13px; padding:13px 14px; border-radius:var(--radius); background:var(--ink-2); border:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:border-color .15s ease, transform .1s ease; }
+  .book-card:hover{ border-color:var(--brass); transform:translateY(-1px); }
+  .book-card .spine{ width:5px; align-self:stretch; border-radius:4px; background:var(--brass); flex-shrink:0; min-height:40px; }
+  .book-card.fmt-epub .spine{ background:var(--moss); }
+  .book-card.fmt-docx .spine{ background:var(--steel); }
+  .book-card.fmt-txt .spine{ background:var(--text-muted-light); }
+  .book-card.dim .spine{ opacity:0.35; }
+  .book-card .info{ flex:1; min-width:0; }
+  .book-card .info .title{ font-family:'Fraunces', serif; font-weight:600; font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .book-card .info .meta{ font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-muted-light); margin-top:4px; display:flex; align-items:center; gap:6px; }
+  .format-badge{ font-family:'IBM Plex Mono', monospace; font-size:9px; padding:2px 6px; border-radius:4px; letter-spacing:0.05em; text-transform:uppercase; }
+  .format-badge.pdf{ background:rgba(201,162,75,0.18); color:var(--brass-bright); }
+  .format-badge.epub{ background:rgba(110,143,116,0.22); color:#A9D0AF; }
+  .format-badge.docx{ background:rgba(111,147,196,0.22); color:#A9C4EA; }
+  .format-badge.txt{ background:rgba(255,255,255,0.08); color:var(--text-muted-light); }
+  .progress-ring{ width:34px; height:34px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; background:conic-gradient(var(--brass-bright) calc(var(--pct)*1%), rgba(255,255,255,0.12) 0); }
+  .progress-ring span{ width:25px; height:25px; border-radius:50%; background:var(--ink-2); display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono', monospace; font-size:8.5px; color:var(--text-muted-light); }
+  #clearLibraryBtn{ margin-top:20px; font-size:11px; color:var(--text-muted-light); border-color:rgba(255,255,255,0.1); }
+
+  /* Reader */
+  #readerView{ flex:1; display:flex; min-height:0; }
+  #chaptersPanel{ width:250px; flex-shrink:0; background:var(--ink-2); border-right:1px solid rgba(255,255,255,0.07); overflow-y:auto; padding:20px 14px; }
+  #chaptersPanel h3{ font-family:'Fraunces', serif; font-size:14px; font-weight:600; font-style:italic; color:var(--text-muted-light); margin:4px 8px 14px; }
+  .chapter-item{ display:flex; align-items:baseline; gap:9px; padding:9px 8px; border-radius:7px; cursor:pointer; font-size:13.5px; color:var(--text-muted-light); line-height:1.4; transition:background .12s ease, color .12s ease; }
+  .chapter-item .num{ font-family:'IBM Plex Mono', monospace; font-size:10.5px; opacity:0.7; flex-shrink:0; width:20px; }
+  .chapter-item:hover{ background:rgba(255,255,255,0.05); color:var(--text-light); }
+  .chapter-item.current{ background:rgba(201,162,75,0.12); color:var(--brass-bright); font-weight:600; }
+
+  #pageWrap{ flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
+  #bookHeaderBar{ padding:14px 20px 8px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid rgba(255,255,255,0.06); flex-wrap:wrap; }
+  #bookHeaderBar .titles{ min-width:0; display:flex; align-items:center; gap:10px; }
+  #bookTitleLabel{ font-family:'Fraunces', serif; font-weight:600; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42vw; }
+  #bookChapterLabel{ font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-muted-light); margin-top:2px; }
+  .header-actions{ display:flex; gap:8px; align-items:center; }
+
+  .eq{ display:inline-flex; align-items:flex-end; gap:2px; height:13px; }
+  .eq i{ width:3px; background:var(--brass-bright); border-radius:1px; height:4px; display:block; }
+  .eq.playing i{ animation: eqbounce 0.9s ease-in-out infinite; }
+  .eq.playing i:nth-child(2){ animation-delay:0.15s; }
+  .eq.playing i:nth-child(3){ animation-delay:0.3s; }
+  @keyframes eqbounce{ 0%,100%{height:4px;} 50%{height:13px;} }
+
+  #resumeBanner{ display:flex; align-items:center; gap:10px; background:rgba(201,162,75,0.1); border:1px solid rgba(201,162,75,0.3); color:var(--brass-bright); font-family:'IBM Plex Mono', monospace; font-size:12px; padding:9px 14px; margin:12px 20px 0; border-radius:8px; }
+  #resumeBanner button{ background:none; border:none; color:var(--brass-bright); text-decoration:underline; cursor:pointer; font-family:inherit; font-size:12px; padding:0; }
+
+  #pageScroll{ flex:1; overflow-y:auto; display:flex; justify-content:center; padding:24px 20px 50px; }
+  .page{ position:relative; width:100%; max-width:700px; background:var(--parchment); color:var(--text-dark); border-radius:4px; padding:42px 50px 56px; box-shadow:0 18px 40px rgba(0,0,0,0.35); line-height:1.85; font-size:18px; animation:pageIn .25s ease; }
+  @keyframes pageIn{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:translateY(0); } }
+  .page::before{ content:''; position:absolute; top:0; right:26px; width:22px; height:64px; background:var(--ribbon); clip-path:polygon(0 0,100% 0,100% 100%,50% 78%,0 100%); box-shadow:0 4px 8px rgba(0,0,0,0.25); }
+  .page h2.chapter-heading{ font-family:'Fraunces', serif; font-style:italic; font-weight:600; font-size:25px; margin:0 0 24px; }
+  .sentence{ cursor:pointer; border-radius:3px; transition:background .15s ease, color .15s ease; padding:0 1px; }
+  .sentence:hover{ background:rgba(43,35,24,0.06); }
+  .sentence.active{ background:var(--brass-bright); color:#241C0E; box-shadow:0 0 0 2px var(--brass-bright); }
+  .sentence.read{ color:var(--text-muted-dark); }
+
+  /* Control bar */
+  #controlBar{ flex-shrink:0; background:var(--ink-2); border-top:1px solid rgba(255,255,255,0.08); padding:12px 20px 16px; position:relative; }
+  #seekBar{ height:6px; background:rgba(255,255,255,0.1); border-radius:4px; cursor:pointer; position:relative; margin-bottom:14px; }
+  #seekFill{ position:absolute; left:0; top:0; bottom:0; background:var(--brass); border-radius:4px; }
+  #seekBar .thumb{ position:absolute; top:50%; width:13px; height:13px; border-radius:50%; background:var(--brass-bright); transform:translate(-50%,-50%); box-shadow:0 0 0 3px rgba(0,0,0,0.25); }
+  .controls-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .transport{ display:flex; align-items:center; gap:8px; }
+  .icon-btn{ background:var(--ink-3); border:1px solid rgba(255,255,255,0.1); color:var(--text-light); width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; transition:background .12s ease, transform .1s ease; }
+  .icon-btn:hover{ background:rgba(201,162,75,0.18); }
+  .icon-btn:active{ transform:scale(0.94); }
+  #playBtn{ width:50px; height:50px; background:var(--brass); color:#241C0E; font-size:17px; }
+  #playBtn:hover{ background:var(--brass-bright); }
+  .field-group{ display:flex; align-items:center; gap:8px; font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--text-muted-light); }
+  .field-group label{ white-space:nowrap; }
+  #speedRange{ width:100px; accent-color:var(--brass); }
+  #speedVal{ color:var(--brass-bright); width:34px; display:inline-block; }
+  select{ background:var(--ink-3); color:var(--text-light); border:1px solid rgba(255,255,255,0.14); border-radius:7px; padding:7px 10px; font-family:'IBM Plex Mono', monospace; font-size:12px; max-width:180px; }
+  .spacer{ flex:1; }
+  #timeLabel{ font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--text-muted-light); }
+
+  /* Settings drawer */
+  .settings-drawer{ position:absolute; right:16px; bottom:78px; width:290px; background:var(--ink-3); border:1px solid rgba(255,255,255,0.12); border-radius:12px; padding:16px; box-shadow:0 12px 32px rgba(0,0,0,0.4); animation:pageIn .15s ease; z-index:30; }
+  .settings-drawer h4{ font-family:'Fraunces', serif; font-style:italic; font-size:14px; margin:0 0 12px; color:var(--brass-bright); }
+  .settings-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:12.5px; color:var(--text-muted-light); gap:10px; }
+  .toggle{ width:38px; height:21px; border-radius:20px; background:rgba(255,255,255,0.15); position:relative; cursor:pointer; flex-shrink:0; transition:background .15s ease; border:none; }
+  .toggle.on{ background:var(--brass); }
+  .toggle::after{ content:''; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:#fff; transition:transform .15s ease; }
+  .toggle.on::after{ transform:translateX(17px); }
+  .sleep-options{ display:flex; gap:6px; flex-wrap:wrap; }
+  .sleep-btn{ font-family:'IBM Plex Mono', monospace; font-size:11px; background:var(--ink-2); border:1px solid rgba(255,255,255,0.14); color:var(--text-light); padding:6px 9px; border-radius:7px; cursor:pointer; }
+  .sleep-btn.active{ background:var(--brass); color:#241C0E; border-color:var(--brass); }
+  .settings-note{ font-size:11px; color:var(--text-muted-light); line-height:1.6; margin-top:6px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px; }
+
+  /* Toast */
+  .toast{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--ink-3); border:1px solid rgba(255,255,255,0.15); color:var(--text-light); padding:11px 18px; border-radius:10px; font-size:13px; box-shadow:0 10px 30px rgba(0,0,0,0.4); z-index:100; max-width:88vw; text-align:center; animation:toastIn .2s ease; }
+  @keyframes toastIn{ from{ opacity:0; transform:translate(-50%,8px);} to{ opacity:1; transform:translate(-50%,0);} }
+
+  /* Loading */
+  #loadingOverlay{ position:fixed; inset:0; background:rgba(27,36,48,0.94); display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; z-index:50; }
+  .spinner{ width:34px; height:34px; border-radius:50%; border:3px solid rgba(201,162,75,0.25); border-top-color:var(--brass); animation:spin 0.8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  #loadingLabel{ font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--text-muted-light); }
+
+  input[type=file]{ display:none; }
+  #chaptersToggle{ display:none; }
+
+  @media (max-width: 780px){
+    #chaptersPanel{ position:absolute; left:0; top:0; bottom:0; z-index:20; transform:translateX(-100%); transition:transform .2s ease; box-shadow:12px 0 24px rgba(0,0,0,0.3); }
+    #chaptersPanel.open{ transform:translateX(0); }
+    #chaptersToggle{ display:flex; }
+    .page{ padding:30px 20px 42px; font-size:17px; }
+    #bookTitleLabel{ max-width:56vw; }
+    .field-group.hide-mobile{ display:none; }
+    .settings-drawer{ right:10px; left:10px; width:auto; }
+  }
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+(function(){
+"use strict";
+const { useState, useEffect, useRef, useMemo, Fragment } = React;
+const h = React.createElement;
+const synth = window.speechSynthesis;
+const hasTTS = 'speechSynthesis' in window;
+
+// ---------------------------------------------------------------------
+// Storage polyfill — window.storage only exists inside the Claude.ai
+// artifact preview. When this file is saved and opened as a standalone
+// HTML file in a normal browser, that API doesn't exist, so we fall
+// back to IndexedDB with the same get/set/delete/list shape.
+// ---------------------------------------------------------------------
+if (!window.storage) {
+  window.storage = (function(){
+    const DB_NAME = 'reading-room-storage';
+    const STORE = 'kv';
+    let dbPromise = null;
+    function getDB(){
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore(STORE); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      return dbPromise;
+    }
+    async function get(key, shared){
+      const db = await getDB();
+      return new Promise((resolve, reject) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+        req.onsuccess = () => {
+          if (req.result === undefined) reject(new Error('Key not found: ' + key));
+          else resolve({ key, value: req.result, shared: !!shared });
+        };
+        req.onerror = () => reject(req.error);
+      });
+    }
+    async function set(key, value, shared){
+      const db = await getDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(value, key);
+        tx.oncomplete = () => resolve({ key, value, shared: !!shared });
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    async function del(key, shared){
+      const db = await getDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(key);
+        tx.oncomplete = () => resolve({ key, deleted:true, shared: !!shared });
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    async function list(prefix, shared){
+      const db = await getDB();
+      return new Promise((resolve, reject) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAllKeys();
+        req.onsuccess = () => {
+          let keys = req.result;
+          if (prefix) keys = keys.filter(k => typeof k === 'string' && k.indexOf(prefix) === 0);
+          resolve({ keys, prefix, shared: !!shared });
+        };
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return { get, set, delete: del, list };
+  })();
+}
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ---------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------
+function hashId(str){
+  let hs = 5381;
+  for (let i=0;i<str.length;i++) hs = ((hs<<5)+hs) + str.charCodeAt(i);
+  return (hs>>>0).toString(16);
+}
+function fmtPct(n){ return Math.round(n*100); }
+function extOf(filename){
+  const m = filename.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return m ? m[1] : '';
+}
+
+// ---------------------------------------------------------------------
+// Chapter-mark detection (shared by pdf / txt / docx fallback)
+// ---------------------------------------------------------------------
+const CHAPTER_REGEX = /^(chapter|part|book|section)\s+([0-9]+|[ivxlcdm]+)\b/i;
+function detectChapterMarksFromLines(lines){
+  const marks = [];
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    if (CHAPTER_REGEX.test(trimmed) && trimmed.length < 70){
+      marks.push({ title: trimmed, lineIndex: idx });
+    }
+  });
+  if (marks.length === 0){
+    const chunkSize = 120; // fallback: chunk by line count if no headings found
+    for (let i = 0, n = 1; i < lines.length; i += chunkSize, n++){
+      marks.push({ title: 'Section ' + n, lineIndex: i });
+    }
+    if (marks.length === 0) marks.push({ title: 'Beginning', lineIndex: 0 });
+  }
+  return marks;
+}
+function buildSentencesFromMarks(allLines, marks){
+  const sorted = marks.slice().sort((a,b) => a.lineIndex - b.lineIndex);
+  if (sorted.length === 0 || sorted[0].lineIndex > 0) sorted.unshift({ title:'Beginning', lineIndex:0 });
+  const chapters = [];
+  const sentences = [];
+  for (let m=0; m<sorted.length; m++){
+    const start = sorted[m].lineIndex;
+    const end = (m+1<sorted.length) ? sorted[m+1].lineIndex : allLines.length;
+    // If this mark came from a detected heading LINE (PDF/TXT fallback), that
+    // same line is both the chapter title and allLines[start] — skip it so it
+    // doesn't get fused onto the first sentence of the chapter body.
+    const bodyStart = (allLines[start] && allLines[start].trim() === sorted[m].title) ? start + 1 : start;
+    const chunkText = allLines.slice(bodyStart, end).join(' ').replace(/\s+/g,' ').trim();
+    const chapterIndex = chapters.length;
+    chapters.push({ title: sorted[m].title, startSentence: sentences.length });
+    if (!chunkText) continue;
+    const matches = chunkText.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [chunkText];
+    matches.forEach(s => { const t = s.trim(); if (t) sentences.push({ text:t, chapter:chapterIndex }); });
+  }
+  return { sentences, chapters };
+}
+
+
+async function extractPDF(file, onProgress){
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({
+    data: buf,
+    isEvalSupported: false,
+    disableFontFace: true,
+    useWorkerFetch: false,
+    disableAutoFetch: true
+  }).promise;
+  const allLines = [];
+  for (let i=1; i<=pdf.numPages; i++){
+    if (onProgress) onProgress(`Reading page ${i} of ${pdf.numPages}…`);
+    try {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      let currentY = null, currentLine = [];
+      const flush = () => { if (currentLine.length) allLines.push(currentLine.join(' ').replace(/\s+/g,' ').trim()); currentLine = []; };
+      for (const item of content.items){
+        if (!item.str || !item.str.trim()) continue;
+        const y = Math.round(item.transform[5]);
+        if (currentY === null || Math.abs(y-currentY) > 2){ flush(); currentY = y; }
+        currentLine.push(item.str);
+      }
+      flush();
+    } catch (pageErr) {
+      console.warn('Skipping unreadable PDF page', i, pageErr);
+    }
+  }
+  const lines = allLines.filter(l => l.length > 0);
+  return { allLines: lines, marks: detectChapterMarksFromLines(lines), titleHint: null };
+}
+
+async function extractTXT(file, onProgress){
+  if (onProgress) onProgress('Reading text file…');
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  return { allLines: lines, marks: detectChapterMarksFromLines(lines), titleHint: null };
+}
+
+async function ocrCanvas(canvas, onProgress){
+  if (!window.Tesseract) throw new Error('OCR library unavailable');
+  const result = await window.Tesseract.recognize(canvas, 'eng', {
+    logger: (m) => {
+      if (m && m.status === 'recognizing text' && Number.isFinite(m.progress)) {
+        const pct = Math.round(m.progress * 100);
+        if (onProgress) onProgress('OCR scanning… ' + pct + '%');
+      }
+    }
+  });
+  const text = (result && result.data && result.data.text ? result.data.text : '').trim();
+  const lines = text ? text.split(/\r?\n/).map(l => l.trim()).filter(Boolean) : [];
+  return lines;
+}
+
+async function extractScannedPDF(file, onProgress){
+  if (onProgress) onProgress('Reading scanned PDF pages with OCR…');
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({
+    data: buf,
+    isEvalSupported: false,
+    disableFontFace: true,
+    useWorkerFetch: false,
+    disableAutoFetch: true
+  }).promise;
+  const allLines = [];
+  for (let i = 1; i <= pdf.numPages; i++){
+    if (onProgress) onProgress('OCR page ' + i + ' of ' + pdf.numPages + '…');
+    try {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const lines = await ocrCanvas(canvas, onProgress);
+      if (lines.length) allLines.push(...lines);
+    } catch (pageErr) {
+      console.warn('Skipping OCR page', i, pageErr);
+    }
+  }
+  return { allLines, marks: detectChapterMarksFromLines(allLines), titleHint: null };
+}
+
+async function extractImageFile(file, onProgress){
+  if (onProgress) onProgress('Reading image with OCR…');
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  try{
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const lines = await ocrCanvas(canvas, onProgress);
+    return { allLines: lines, marks: detectChapterMarksFromLines(lines), titleHint: null };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function extractDOCX(file, onProgress){
+  if (onProgress) onProgress('Converting Word document…');
+  const buf = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer: buf });
+  const doc = new DOMParser().parseFromString(result.value, 'text/html');
+  const allLines = [];
+  const marks = [];
+  Array.from(doc.body.children).forEach(node => {
+    const tag = node.tagName.toLowerCase();
+    const text = node.textContent.replace(/\s+/g,' ').trim();
+    if (!text) return;
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3') marks.push({ title:text, lineIndex:allLines.length });
+    else allLines.push(text);
+  });
+  const finalMarks = marks.length ? marks : detectChapterMarksFromLines(allLines);
+  return { allLines, marks: finalMarks, titleHint: null };
+}
+
+async function extractEPUB(file, onProgress){
+  if (onProgress) onProgress('Unpacking EPUB…');
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const containerXml = await zip.file('META-INF/container.xml').async('string');
+  const containerDoc = new DOMParser().parseFromString(containerXml, 'application/xml');
+  const rootfileEl = containerDoc.querySelector('rootfile');
+  const opfPath = rootfileEl.getAttribute('full-path');
+  const opfDir = opfPath.includes('/') ? opfPath.split('/').slice(0,-1).join('/') : '';
+  const opfXml = await zip.file(opfPath).async('string');
+  const opfDoc = new DOMParser().parseFromString(opfXml, 'application/xml');
+  const manifest = {};
+  opfDoc.querySelectorAll('manifest > item').forEach(item => { manifest[item.getAttribute('id')] = item.getAttribute('href'); });
+  const spineIds = Array.from(opfDoc.querySelectorAll('spine > itemref')).map(el => el.getAttribute('idref'));
+  const titleEl = opfDoc.querySelector('metadata title, metadata > *');
+  let titleHint = null;
+  const dcTitle = opfDoc.getElementsByTagName('dc:title')[0] || opfDoc.querySelector('title');
+  if (dcTitle) titleHint = dcTitle.textContent.trim();
+
+  const allLines = [];
+  const marks = [];
+  for (let i=0; i<spineIds.length; i++){
+    if (onProgress) onProgress(`Reading chapter ${i+1} of ${spineIds.length}…`);
+    const href = manifest[spineIds[i]];
+    if (!href) continue;
+    let path = opfDir ? (opfDir + '/' + href) : href;
+    path = path.replace(/^\.\//, '');
+    let entry = zip.file(path) || zip.file(decodeURIComponent(path));
+    if (!entry){
+      const base = href.split('/').pop();
+      const found = Object.keys(zip.files).find(k => k.endsWith(base));
+      if (found) entry = zip.file(found);
+    }
+    if (!entry) continue;
+    const htmlStr = await entry.async('string');
+    const doc = new DOMParser().parseFromString(htmlStr, 'text/html');
+    const heading = doc.querySelector('h1, h2, h3');
+    const docTitle = doc.querySelector('title');
+    const title = (heading && heading.textContent.trim()) || (docTitle && docTitle.textContent.trim()) || ('Section ' + (marks.length+1));
+    marks.push({ title, lineIndex: allLines.length });
+    const blocks = doc.querySelectorAll('p, h1, h2, h3, h4, li, blockquote');
+    if (blocks.length){
+      blocks.forEach(b => { const t = b.textContent.replace(/\s+/g,' ').trim(); if (t) allLines.push(t); });
+    } else if (doc.body){
+      const t = doc.body.textContent.replace(/\s+/g,' ').trim();
+      if (t) allLines.push(t);
+    }
+  }
+  return { allLines, marks, titleHint };
+}
+
+async function extractByFormat(file, onProgress){
+  const ext = extOf(file.name);
+  if (ext === 'pdf') {
+    try {
+      const textResult = await extractPDF(file, onProgress);
+      if (textResult.allLines && textResult.allLines.length) return { ext, ...textResult };
+    } catch (err) {
+      console.warn('Primary PDF parse failed; trying OCR fallback.', err);
+    }
+    try {
+      const scannedResult = await extractScannedPDF(file, onProgress);
+      if (scannedResult.allLines && scannedResult.allLines.length) return { ext, ...scannedResult };
+    } catch (err) {
+      console.warn('OCR fallback failed for PDF.', err);
+    }
+    throw new Error('NO_READABLE_PDF_TEXT');
+  }
+  if (ext === 'epub') return { ext, ...(await extractEPUB(file, onProgress)) };
+  if (ext === 'docx') return { ext, ...(await extractDOCX(file, onProgress)) };
+  if (ext === 'txt' || ext === 'md') return { ext, ...(await extractTXT(file, onProgress)) };
+  if (['png','jpg','jpeg','webp','bmp'].includes(ext)) return { ext, ...(await extractImageFile(file, onProgress)) };
+  throw new Error('UNSUPPORTED_FORMAT');
+}
+
+// ---------------------------------------------------------------------
+// Persistent storage (window.storage — artifacts cannot use localStorage)
+// ---------------------------------------------------------------------
+async function loadLibraryIndex(){
+  try{ const res = await window.storage.get('rr-library', false); return res ? JSON.parse(res.value) : []; }
+  catch(e){ return []; }
+}
+async function saveLibraryIndex(lib){
+  try{ await window.storage.set('rr-library', JSON.stringify(lib), false); } catch(e){ console.error(e); }
+}
+async function saveProgressToStorage(bookId, sentenceIndex){
+  try{ await window.storage.set('rr-progress:' + bookId, JSON.stringify({ sentenceIndex, updatedAt: Date.now() }), false); }
+  catch(e){ console.error(e); }
+}
+async function saveFullBook(bookId, title, chapters, sentences){
+  try{
+    const payload = JSON.stringify({ title, chapters, sentences: sentences.map(s => ({ t:s.text, c:s.chapter })) });
+    if (payload.length < 4500000){ await window.storage.set('rr-book:' + bookId, payload, false); return true; }
+    return false;
+  } catch(e){ console.error(e); return false; }
+}
+
+// ---------------------------------------------------------------------
+// Voices
+// ---------------------------------------------------------------------
+function useVoices(){
+  const [voices, setVoices] = useState([]);
+  useEffect(() => {
+    if (!hasTTS) return;
+    const populate = () => setVoices(synth.getVoices());
+    populate();
+    synth.onvoiceschanged = populate;
+    return () => { synth.onvoiceschanged = null; };
+  }, []);
+  return voices;
+}
+
+// ---------------------------------------------------------------------
+// Small components
+// ---------------------------------------------------------------------
+function Toast({ message }){
+  if (!message) return null;
+  return h('div', { className:'toast' }, message);
+}
+
+function LoadingOverlay({ active, label }){
+  if (!active) return null;
+  return h('div', { id:'loadingOverlay' }, h('div', { className:'spinner' }), h('div', { id:'loadingLabel' }, label || 'Working…'));
+}
+
+function Equalizer({ playing }){
+  return h('span', { className:'eq' + (playing ? ' playing' : '') }, h('i'), h('i'), h('i'));
+}
+
+function BookCard({ book, onOpen }){
+  const pct = book.totalSentences ? fmtPct(book.sentenceIndex / book.totalSentences) : 0;
+  return h('div', { className:'book-card fmt-' + book.format + (book.hasFullText ? '' : ' dim'), onClick: () => onOpen(book) },
+    h('div', { className:'spine' }),
+    h('div', { className:'info' },
+      h('div', { className:'title' }, book.title),
+      h('div', { className:'meta' },
+        h('span', { className:'format-badge ' + book.format }, book.format),
+        h('span', null, book.hasFullText ? (pct + '% read') : 'saved position only')
+      )
+    ),
+    book.hasFullText
+      ? h('div', { className:'progress-ring', style:{ '--pct': pct } }, h('span', null, pct + '%'))
+      : h('div', { className:'progress-ring', style:{ '--pct': 0 } }, h('span', null, '↻'))
+  );
+}
+
+function LibraryView(props){
+  const { library, onFiles, onOpen, onClear, dragOver, setDragOver, fileInputRef } = props;
+  return h('div', { id:'libraryView' },
+    h('div', { className:'library-inner' },
+      h('div', { className:'hero' },
+        h('h2', null, 'Your books, read aloud.'),
+        h('p', null, 'Drop in a book and The Reading Room will find its chapters, read it out loud at your pace, and remember exactly where you stopped — even after you close the tab.')
+      ),
+      h('div', {
+        className:'dropzone' + (dragOver ? ' dragover' : ''),
+        onClick: () => fileInputRef.current && fileInputRef.current.click(),
+        onDragOver: (e) => { e.preventDefault(); setDragOver(true); },
+        onDragLeave: (e) => { e.preventDefault(); setDragOver(false); },
+        onDrop: (e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }
+      },
+        h('div', { className:'icon' }, '📖'),
+        h('strong', null, 'Drop a book here, or click to choose'),
+        h('span', null, 'Everything is parsed right in your browser — nothing is uploaded anywhere.'),
+        h('input', { ref: fileInputRef, type:'file', accept:'.pdf,.epub,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,.bmp', multiple:true, onChange: (e) => onFiles(e.target.files) })
+      ),
+      h('div', { className:'formats-line' }, h('b', null, 'Supports:'), ' PDF · EPUB · Word (.docx) · plain text (.txt/.md) · image files from your Downloads. Scanned pages are OCR-read when the browser can access the file.'),
+      library.length > 0 && h(Fragment, null,
+        h('div', { className:'shelf-heading' }, 'Continue reading'),
+        h('div', { className:'shelf-grid' }, library.map(b => h(BookCard, { key:b.id, book:b, onOpen }))),
+        h('button', { id:'clearLibraryBtn', className:'btn', onClick:onClear }, 'Clear saved library')
+      )
+    )
+  );
+}
+
+function ChapterList({ chapters, currentChapterIdx, onJump }){
+  return h('div', { id:'chaptersPanel', className: 'open-target' },
+    h('h3', null, 'Contents'),
+    h('div', null, chapters.map((c,i) => h('div', {
+        key:i,
+        className:'chapter-item' + (i===currentChapterIdx ? ' current' : ''),
+        onClick: () => onJump(c.startSentence)
+      },
+      h('span', { className:'num' }, String(i+1).padStart(2,'0')),
+      h('span', null, c.title)
+    )))
+  );
+}
+
+function SettingsDrawer(props){
+  const { onClose, wakeLockOn, onToggleWakeLock, sleepMinutes, onSetSleep } = props;
+  const sleepChoices = [15, 30, 45, 60];
+  return h('div', { className:'settings-drawer' },
+    h('h4', null, 'Playback settings'),
+    h('div', { className:'settings-row' },
+      h('span', null, 'Keep screen on while listening'),
+      h('button', { className:'toggle' + (wakeLockOn ? ' on' : ''), onClick:onToggleWakeLock })
+    ),
+    h('div', { className:'settings-row', style:{ display:'block' } },
+      h('div', { style:{ marginBottom:'8px' } }, 'Sleep timer'),
+      h('div', { className:'sleep-options' },
+        sleepChoices.map(m => h('button', {
+          key:m, className:'sleep-btn' + (sleepMinutes===m ? ' active' : ''), onClick: () => onSetSleep(sleepMinutes===m ? null : m)
+        }, m + ' min')),
+        h('button', { className:'sleep-btn' + (sleepMinutes===null ? ' active' : ''), onClick: () => onSetSleep(null) }, 'Off')
+      )
+    ),
+    h('div', { className:'settings-note' },
+      'Lock-screen play/pause controls are enabled where the browser supports it. That said, once the screen locks or the app moves to the background, iOS Safari (and some Android browsers) will pause speech — this is a platform limit, not a bug here. "Keep screen on" is the most reliable way to keep listening uninterrupted.'
+    )
+  );
+}
+
+// ---------------------------------------------------------------------
+// Main App
+// ---------------------------------------------------------------------
+function App(){
+  const [view, setView] = useState('library');
+  const [library, setLibrary] = useState([]);
+  const [loading, setLoading] = useState({ active:false, label:'' });
+  const [dragOver, setDragOver] = useState(false);
+  const [toast, setToast] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chaptersOpen, setChaptersOpen] = useState(false);
+  const [wakeLockOn, setWakeLockOn] = useState(false);
+  const [sleepMinutes, setSleepMinutes] = useState(null);
+  const [resumeInfo, setResumeInfo] = useState(null);
+
+  // current book
+  const [bookId, setBookId] = useState(null);
+  const [bookTitle, setBookTitle] = useState('');
+  const [bookFormat, setBookFormat] = useState('pdf');
+  const [bookStoredFully, setBookStoredFully] = useState(false);
+  const [sentences, setSentences] = useState([]);
+  const [chapters, setChapters] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [rate, setRate] = useState(1);
+  const [voiceURI, setVoiceURI] = useState(null);
+  const voices = useVoices();
+
+  const fileInputRef = useRef(null);
+  const pageScrollRef = useRef(null);
+  const wakeLockRef = useRef(null);
+  const sleepTimeoutRef = useRef(null);
+
+  const stateRef = useRef({ sentences:[], chapters:[], rate:1, voiceURI:null });
+  const playTokenRef = useRef(0);
+  const isPlayingRef = useRef(false);
+  const currentIndexRef = useRef(0);
+  const bookIdRef = useRef(null);
+
+  useEffect(() => { stateRef.current.sentences = sentences; }, [sentences]);
+  useEffect(() => { stateRef.current.chapters = chapters; }, [chapters]);
+  useEffect(() => { stateRef.current.rate = rate; }, [rate]);
+  useEffect(() => { stateRef.current.voiceURI = voiceURI; }, [voiceURI]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { bookIdRef.current = bookId; }, [bookId]);
+
+  useEffect(() => { loadLibraryIndex().then(setLibrary); }, []);
+  useEffect(() => {
+    if (voices.length && !voiceURI){
+      const en = voices.filter(v => v.lang && v.lang.startsWith('en'));
+      setVoiceURI((en.length ? en[0] : voices[0]).voiceURI);
+    }
+  }, [voices]);
+
+  function showToast(msg, ms){
+    setToast(msg);
+    window.clearTimeout(showToast._t);
+    showToast._t = window.setTimeout(() => setToast(''), ms || 3200);
+  }
+
+  const customTTSConfig = window.CUSTOM_TTS || {};
+  const customTTSEndpoint = customTTSConfig.endpoint || window.TTS_API_URL || null;
+  const customTTSHeaders = customTTSConfig.headers || {};
+
+  function speakSentenceWithCustomTTS(idx, token){
+    if (token !== playTokenRef.current) return;
+    const s = stateRef.current;
+    if (idx >= s.sentences.length){
+      isPlayingRef.current = false; setIsPlaying(false);
+      if (bookIdRef.current) saveProgressToStorage(bookIdRef.current, idx);
+      return;
+    }
+    const text = s.sentences[idx].text;
+    setCurrentIndex(idx);
+    fetch(customTTSEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...customTTSHeaders },
+      body: JSON.stringify({ text, rate: s.rate, voice: s.voiceURI })
+    }).then(async (res) => {
+      if (!res.ok) throw new Error('Custom TTS request failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.playbackRate = s.rate;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (token !== playTokenRef.current) return;
+        const next = idx + 1;
+        setCurrentIndex(next);
+        if (bookIdRef.current && next % 5 === 0) saveProgressToStorage(bookIdRef.current, next);
+        speakSentence(next, token);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (token !== playTokenRef.current) return;
+        speakSentence(idx, token);
+      };
+      audio.play().catch(() => {
+        URL.revokeObjectURL(url);
+        if (token !== playTokenRef.current) return;
+        speakSentence(idx, token);
+      });
+    }).catch(() => {
+      if (token !== playTokenRef.current) return;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = s.rate;
+      const voice = voices.find(v => v.voiceURI === s.voiceURI);
+      if (voice) utter.voice = voice;
+      utter.onend = () => {
+        if (token !== playTokenRef.current) return;
+        const next = idx + 1;
+        setCurrentIndex(next);
+        if (bookIdRef.current && next % 5 === 0) saveProgressToStorage(bookIdRef.current, next);
+        speakSentence(next, token);
+      };
+      utter.onerror = () => {};
+      synth.speak(utter);
+    });
+  }
+
+  // ---------------- speech engine ----------------
+  function speakSentence(idx, token){
+    if (token !== playTokenRef.current) return;
+    const s = stateRef.current;
+    if (idx >= s.sentences.length){
+      isPlayingRef.current = false; setIsPlaying(false);
+      if (bookIdRef.current) saveProgressToStorage(bookIdRef.current, idx);
+      return;
+    }
+    if (customTTSEndpoint) return speakSentenceWithCustomTTS(idx, token);
+    const utter = new SpeechSynthesisUtterance(s.sentences[idx].text);
+    utter.rate = s.rate;
+    const voice = voices.find(v => v.voiceURI === s.voiceURI);
+    if (voice) utter.voice = voice;
+    utter.onend = () => {
+      if (token !== playTokenRef.current) return;
+      const next = idx + 1;
+      setCurrentIndex(next);
+      if (bookIdRef.current && next % 5 === 0) saveProgressToStorage(bookIdRef.current, next);
+      speakSentence(next, token);
+    };
+    utter.onerror = () => {};
+    setCurrentIndex(idx);
+    synth.speak(utter);
+  }
+  function play(fromIndex){
+    if (!hasTTS || !stateRef.current.sentences.length) return;
+    playTokenRef.current++;
+    const token = playTokenRef.current;
+    isPlayingRef.current = true; setIsPlaying(true);
+    synth.cancel();
+    speakSentence(fromIndex !== undefined ? fromIndex : currentIndexRef.current, token);
+  }
+  function pause(){
+    playTokenRef.current++;
+    isPlayingRef.current = false; setIsPlaying(false);
+    synth.cancel();
+    if (bookIdRef.current) saveProgressToStorage(bookIdRef.current, currentIndexRef.current);
+  }
+  function togglePlay(){ isPlayingRef.current ? pause() : play(currentIndexRef.current); }
+
+  function jumpTo(idx){
+    const wasPlaying = isPlayingRef.current;
+    if (wasPlaying) pause();
+    const clamped = Math.max(0, Math.min(idx, stateRef.current.sentences.length - 1));
+    setCurrentIndex(clamped);
+    if (wasPlaying) play(clamped);
+  }
+  const currentChapterIdx = useMemo(() => {
+    let ci = 0;
+    for (let i=0;i<chapters.length;i++){ if (chapters[i].startSentence <= currentIndex) ci = i; else break; }
+    return ci;
+  }, [currentIndex, chapters]);
+  const chapterRange = useMemo(() => {
+    if (!chapters.length) return [0,0];
+    const start = chapters[currentChapterIdx].startSentence;
+    const end = (currentChapterIdx+1 < chapters.length) ? chapters[currentChapterIdx+1].startSentence : sentences.length;
+    return [start, end];
+  }, [chapters, currentChapterIdx, sentences.length]);
+
+  function nextSentence(){ jumpTo(currentIndex + 1); }
+  function prevSentence(){ jumpTo(Math.max(0, currentIndex - 1)); }
+  function nextChapter(){ if (currentChapterIdx < chapters.length - 1) jumpTo(chapters[currentChapterIdx+1].startSentence); }
+  function prevChapter(){
+    const [start] = chapterRange;
+    if (currentIndex > start) jumpTo(start);
+    else if (currentChapterIdx > 0) jumpTo(chapters[currentChapterIdx-1].startSentence);
+  }
+
+  // rate / voice change restarts current sentence if playing
+  useEffect(() => { if (isPlayingRef.current) play(currentIndexRef.current); }, [rate, voiceURI]);
+
+  // auto-scroll active sentence
+  useEffect(() => {
+    if (!pageScrollRef.current) return;
+    const activeEl = pageScrollRef.current.querySelector('.sentence.active');
+    if (activeEl) activeEl.scrollIntoView({ block:'center', behavior:'smooth' });
+  }, [currentIndex]);
+
+  // media session (lock-screen controls, best effort)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    try{
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: chapters[currentChapterIdx] ? chapters[currentChapterIdx].title : bookTitle,
+        artist: bookTitle,
+        album: 'The Reading Room'
+      });
+      navigator.mediaSession.setActionHandler('play', () => play(currentIndexRef.current));
+      navigator.mediaSession.setActionHandler('pause', () => pause());
+      navigator.mediaSession.setActionHandler('previoustrack', () => prevSentence());
+      navigator.mediaSession.setActionHandler('nexttrack', () => nextSentence());
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    } catch(e){ /* not supported in this browser */ }
+  }, [bookTitle, currentChapterIdx, isPlaying, chapters]);
+
+  // wake lock
+  async function requestWakeLock(){
+    try{
+      if ('wakeLock' in navigator){
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        return true;
+      }
+    } catch(e){ console.error(e); }
+    showToast('This browser doesn\u2019t support keeping the screen on.');
+    return false;
+  }
+  function releaseWakeLock(){ if (wakeLockRef.current){ wakeLockRef.current.release().catch(()=>{}); wakeLockRef.current = null; } }
+  async function toggleWakeLock(){
+    if (wakeLockOn){ releaseWakeLock(); setWakeLockOn(false); }
+    else { const ok = await requestWakeLock(); if (ok) setWakeLockOn(true); }
+  }
+  useEffect(() => {
+    function onVisible(){ if (wakeLockOn && document.visibilityState === 'visible' && !wakeLockRef.current) requestWakeLock(); }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [wakeLockOn]);
+
+  // sleep timer
+  function setSleepTimer(minutes){
+    if (sleepTimeoutRef.current) window.clearTimeout(sleepTimeoutRef.current);
+    setSleepMinutes(minutes);
+    if (minutes){
+      sleepTimeoutRef.current = window.setTimeout(() => { pause(); setSleepMinutes(null); showToast('Sleep timer ended — playback paused.'); }, minutes * 60000);
+    }
+  }
+
+  // save on unload
+  useEffect(() => {
+    function onUnload(){ if (bookIdRef.current) saveProgressToStorage(bookIdRef.current, currentIndexRef.current); }
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, []);
+
+  // keyboard shortcuts
+  useEffect(() => {
+    function onKey(e){
+      if (view !== 'reader') return;
+      const tag = document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.code === 'Space'){ e.preventDefault(); togglePlay(); }
+      else if (e.code === 'ArrowRight'){ e.preventDefault(); nextSentence(); }
+      else if (e.code === 'ArrowLeft'){ e.preventDefault(); prevSentence(); }
+      else if (e.code === 'ArrowDown'){ e.preventDefault(); nextChapter(); }
+      else if (e.code === 'ArrowUp'){ e.preventDefault(); prevChapter(); }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
+  // ---------------- library / file handling ----------------
+  async function refreshLibraryEntry(id, title, format, total, idx, hasFullText){
+    setLibrary(prev => {
+      const filtered = prev.filter(b => b.id !== id);
+      const updated = [{ id, title, format, totalSentences: total, sentenceIndex: idx, updatedAt: Date.now(), hasFullText }, ...filtered].slice(0, 40);
+      saveLibraryIndex(updated);
+      return updated;
+    });
+  }
+
+  async function openBook(id, title, format, chaps, sents, startIndex, storedFully){
+    setBookId(id); setBookTitle(title); setBookFormat(format);
+    setChapters(chaps); setSentences(sents);
+    setCurrentIndex(Math.max(0, Math.min(startIndex, sents.length - 1)));
+    setBookStoredFully(storedFully);
+    setView('reader');
+    setResumeInfo(null);
+    setChaptersOpen(false);
+  }
+
+  async function handleSingleFile(file){
+    const ext = extOf(file.name);
+    if (!['pdf','epub','docx','txt','md','png','jpg','jpeg','webp','bmp'].includes(ext)){
+      showToast('"' + file.name + '" isn\u2019t a supported format (PDF, EPUB, DOCX, TXT, or common image files).');
+      return;
+    }
+    setLoading({ active:true, label:'Opening ' + file.name + '…' });
+    try{
+      const { allLines, marks, titleHint } = await extractByFormat(file, (label) => setLoading({ active:true, label }));
+      const built = buildSentencesFromMarks(allLines, marks);
+      if (!built.sentences.length){
+        setLoading({ active:false, label:'' });
+        showToast('Couldn\u2019t find readable text in "' + file.name + '" — it may be a scanned/image-only file.');
+        return;
+      }
+      const title = titleHint || file.name.replace(/\.[^.]+$/, '');
+      const id = hashId(file.name + '|' + file.size);
+
+      let startIndex = 0;
+      const progRes = await window.storage.get('rr-progress:' + id, false).catch(() => null);
+      if (progRes){
+        const prog = JSON.parse(progRes.value);
+        if (prog.sentenceIndex > 0 && prog.sentenceIndex < built.sentences.length){
+          startIndex = prog.sentenceIndex;
+          setResumeInfo({ pct: fmtPct(startIndex / built.sentences.length) });
+        }
+      }
+      setLoading({ active:true, label:'Saving to your library…' });
+      const storedFully = await saveFullBook(id, title, built.chapters, built.sentences);
+      await refreshLibraryEntry(id, title, ext, built.sentences.length, startIndex, storedFully);
+      setLoading({ active:false, label:'' });
+      openBook(id, title, ext, built.chapters, built.sentences, startIndex, storedFully);
+    } catch(e){
+      console.error(e);
+      setLoading({ active:false, label:'' });
+      showToast('Couldn\u2019t read "' + file.name + '". The browser may not be able to extract readable text from this file, even if it is accessible locally. Try a text-based PDF, OCR-friendly scan, or a non-locked version.');
+    }
+  }
+  async function handleFiles(fileList){
+    const files = Array.from(fileList || []);
+    for (const f of files) await handleSingleFile(f);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function openFromLibrary(book){
+    if (!book.hasFullText){
+      showToast('Please re-upload "' + book.title + '" — your progress (' + fmtPct(book.sentenceIndex / (book.totalSentences||1)) + '%) will be restored automatically.');
+      fileInputRef.current && fileInputRef.current.click();
+      return;
+    }
+    setLoading({ active:true, label:'Opening ' + book.title + '…' });
+    try{
+      const res = await window.storage.get('rr-book:' + book.id, false);
+      const data = JSON.parse(res.value);
+      const sents = data.sentences.map(s => ({ text:s.t, chapter:s.c }));
+      const progRes = await window.storage.get('rr-progress:' + book.id, false).catch(() => null);
+      const idx = progRes ? (JSON.parse(progRes.value).sentenceIndex || 0) : 0;
+      setLoading({ active:false, label:'' });
+      openBook(book.id, data.title, book.format, data.chapters, sents, idx, true);
+    } catch(e){
+      console.error(e);
+      setLoading({ active:false, label:'' });
+      showToast('Couldn\u2019t open that book.');
+    }
+  }
+
+  async function clearLibrary(){
+    if (!window.confirm('Clear your saved library and all reading progress? This can\u2019t be undone.')) return;
+    for (const b of library){
+      await window.storage.delete('rr-book:' + b.id, false).catch(()=>{});
+      await window.storage.delete('rr-progress:' + b.id, false).catch(()=>{});
+    }
+    await window.storage.delete('rr-library', false).catch(()=>{});
+    setLibrary([]);
+    showToast('Library cleared.');
+  }
+
+  function backToLibrary(){
+    if (isPlayingRef.current) pause();
+    setView('library');
+  }
+
+  // ---------------- seek bar ----------------
+  function onSeek(e){
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    jumpTo(Math.floor(pct * sentences.length));
+  }
+
+  const pct = sentences.length ? currentIndex / sentences.length : 0;
+
+  // ---------------- render ----------------
+  const header = h('header', null,
+    h('div', { className:'brand' },
+      h('span', { className:'mark' }, 'R'),
+      h('div', null, h('h1', null, 'The Reading Room'), h('div', { className:'sub' }, 'listen to any book'))
+    ),
+    h('nav', null,
+      view === 'reader' && h('button', { id:'chaptersToggle', className:'btn', onClick: () => setChaptersOpen(o => !o) }, '☰ Chapters'),
+      h('button', { className:'btn', onClick: backToLibrary }, 'Library'),
+      h('button', { className:'btn primary', onClick: () => { setView('library'); setTimeout(() => fileInputRef.current && fileInputRef.current.click(), 0); } }, 'Add a book')
+    )
+  );
+
+  let body;
+  if (view === 'library'){
+    body = h(LibraryView, { library, onFiles: handleFiles, onOpen: openFromLibrary, onClear: clearLibrary, dragOver, setDragOver, fileInputRef });
+  } else {
+    const [start, end] = chapterRange;
+    const chapterSentences = sentences.slice(start, end);
+    body = h('div', { id:'readerView' },
+      h('div', { id:'chaptersPanelWrap', className: chaptersOpen ? '' : '' },
+        h('div', { id:'chaptersPanel', className: chaptersOpen ? 'open' : '' },
+          h('h3', null, 'Contents'),
+          h('div', null, chapters.map((c,i) => h('div', {
+              key:i,
+              className:'chapter-item' + (i===currentChapterIdx ? ' current' : ''),
+              onClick: () => { jumpTo(c.startSentence); setChaptersOpen(false); }
+            },
+            h('span', { className:'num' }, String(i+1).padStart(2,'0')),
+            h('span', null, c.title)
+          )))
+        )
+      ),
+      h('div', { id:'pageWrap' },
+        h('div', { id:'bookHeaderBar' },
+          h('div', { className:'titles' },
+            h(Equalizer, { playing:isPlaying }),
+            h('div', null,
+              h('div', { id:'bookTitleLabel' }, bookTitle),
+              h('div', { id:'bookChapterLabel' }, chapters.length ? ('Chapter ' + (currentChapterIdx+1) + ' of ' + chapters.length) : '')
+            )
+          ),
+          h('div', { className:'header-actions' },
+            h('span', { className:'format-badge ' + bookFormat }, bookFormat)
+          )
+        ),
+        resumeInfo && h('div', { id:'resumeBanner' },
+          h('span', null, 'Resumed from ' + resumeInfo.pct + '% through the book.'),
+          h('button', { onClick: () => { setResumeInfo(null); jumpTo(0); } }, 'start over instead')
+        ),
+        h('div', { id:'pageScroll', ref:pageScrollRef },
+          h('div', { className:'page' },
+            h('h2', { className:'chapter-heading' }, chapters[currentChapterIdx] ? chapters[currentChapterIdx].title : ''),
+            h('div', null, chapterSentences.map((s, i) => {
+              const idx = start + i;
+              return h('span', {
+                key:idx,
+                className:'sentence' + (idx===currentIndex ? ' active' : '') + (idx<currentIndex ? ' read' : ''),
+                tabIndex:0,
+                onClick: () => jumpTo(idx),
+                onKeyDown: (e) => { if (e.key==='Enter' || e.key===' '){ e.preventDefault(); jumpTo(idx); } }
+              }, s.text + ' ');
+            }))
+          )
+        ),
+        h('div', { id:'controlBar' },
+          h('div', { id:'seekBar', onClick:onSeek },
+            h('div', { id:'seekFill', style:{ width: fmtPct(pct) + '%' } }),
+            h('div', { className:'thumb', style:{ left: fmtPct(pct) + '%' } })
+          ),
+          h('div', { className:'controls-row' },
+            h('div', { className:'transport' },
+              h('button', { className:'icon-btn', title:'Previous chapter', onClick:prevChapter }, '⏮'),
+              h('button', { className:'icon-btn', title:'Previous sentence', onClick:prevSentence }, '◂'),
+              h('button', { id:'playBtn', className:'icon-btn', title:'Play / Pause', onClick:togglePlay }, isPlaying ? '❚❚' : '▶'),
+              h('button', { className:'icon-btn', title:'Next sentence', onClick:nextSentence }, '▸'),
+              h('button', { className:'icon-btn', title:'Next chapter', onClick:nextChapter }, '⏭')
+            ),
+            h('div', { className:'field-group' },
+              h('label', null, 'Speed'),
+              h('input', { id:'speedRange', type:'range', min:0.5, max:2.5, step:0.1, value:rate, onChange: (e) => setRate(parseFloat(e.target.value)) }),
+              h('span', { id:'speedVal' }, rate.toFixed(1) + '×')
+            ),
+            h('div', { className:'field-group hide-mobile' },
+              h('label', null, 'Voice'),
+              h('select', { value: voiceURI || '', onChange: (e) => setVoiceURI(e.target.value) },
+                voices.filter(v => v.lang && v.lang.startsWith('en')).concat(voices.filter(v => !(v.lang && v.lang.startsWith('en')))).map(v =>
+                  h('option', { key:v.voiceURI, value:v.voiceURI }, v.name + (v.lang ? ' (' + v.lang + ')' : ''))
+                )
+              )
+            ),
+            h('button', { className:'icon-btn', title:'Playback settings', onClick: () => setSettingsOpen(o => !o) }, '⚙'),
+            h('div', { className:'spacer' }),
+            h('div', { id:'timeLabel' }, fmtPct(pct) + '% · sentence ' + (currentIndex+1) + ' / ' + sentences.length)
+          ),
+          settingsOpen && h(SettingsDrawer, {
+            onClose: () => setSettingsOpen(false),
+            wakeLockOn, onToggleWakeLock: toggleWakeLock,
+            sleepMinutes, onSetSleep: setSleepTimer
+          })
+        )
+      )
+    );
+  }
+
+  return h(Fragment, null,
+    header,
+    h('main', null, body),
+    h(LoadingOverlay, { active:loading.active, label:loading.label }),
+    h(Toast, { message:toast })
+  );
+}
+
+if (!hasTTS){
+  window.addEventListener('DOMContentLoaded', () => {
+    window.setTimeout(() => alert("Heads up: this browser doesn't support text-to-speech. Try Chrome, Edge, or Safari for read-aloud support. You can still open books to read chapter by chapter."), 300);
+  });
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(h(App));
+})();
+</script>
+</body>
+</html>
